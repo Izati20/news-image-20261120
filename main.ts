@@ -12,8 +12,10 @@
 //
 // The harness runs this program twice, offline, and expects both runs
 // to agree. So the program keeps to one deterministic job: check the
-// bundled picture is a genuine PNG within the gate's size limits, then
-// copy it unchanged into the output directory under the name entry.png.
+// bundled picture is a genuine PNG within the gate's size limits, copy
+// it unchanged into the output directory under the name entry.png,
+// then re-read the written copy and prove by SHA-256 that the bytes
+// that landed are exactly the bytes that were bundled.
 //
 //   node main.ts                            (writes /output/entry.png)
 //   MAKEFUN_OUTPUT_DIR=out node main.ts     (writes out/entry.png)
@@ -60,12 +62,21 @@ mkdirSync(targetDir, { recursive: true });
 const targetPath = join(targetDir, 'entry.png');
 copyFileSync(bundledPath, targetPath);
 
-// A byte count alone cannot prove the copy survived intact — two
-// different files can share a length. Compare SHA-256 digests of the
-// source and the delivered file instead, and re-check the PNG header
-// on what was actually written.
+// Post-copy verification: a byte count alone cannot prove the copy
+// survived intact — two different files can share a length. So
+// re-read what was actually written to the output directory, take
+// its SHA-256 digest, and demand an exact match with the bundled
+// source's digest; also re-check the PNG header on the delivered
+// bytes. Any mismatch is a hard failure, never a silent pass.
+const sourceDigest = fingerprint(bundledBytes);
 const deliveredBytes = readFileSync(targetPath);
-if (fingerprint(deliveredBytes) !== fingerprint(bundledBytes)) {
-  throw new Error('delivered entry.png does not match the bundled original');
+const deliveredDigest = fingerprint(deliveredBytes);
+if (deliveredDigest !== sourceDigest) {
+  throw new Error(
+    `delivered entry.png digest ${deliveredDigest} does not match the bundled original ${sourceDigest}`,
+  );
 }
 pngDimensions(deliveredBytes);
+console.log(
+  `entry.png copied and verified: ${deliveredBytes.length} bytes, sha256 ${deliveredDigest}`,
+);
